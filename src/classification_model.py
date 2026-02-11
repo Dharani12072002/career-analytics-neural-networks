@@ -1,7 +1,7 @@
-# ==========================================
-# Student Performance Classification using NN
-# Classes: Fail / Pass / Distinction
-# ==========================================
+# ==========================================================
+# STUDENT DROPOUT RISK PREDICTION - CLASSIFICATION USING NN
+# Classes: Dropout / Enrolled / Graduate
+# ==========================================================
 
 import os
 import pandas as pd
@@ -9,7 +9,7 @@ import numpy as np
 
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, precision_score, recall_score
 
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
@@ -20,7 +20,7 @@ from tensorflow.keras.callbacks import EarlyStopping
 # Paths
 # -------------------------------
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_PATH = os.path.join(BASE_DIR, "data", "StudentsPerformance.csv")
+DATA_PATH = os.path.join(BASE_DIR, "data", "studentDropoutDataset.csv")
 OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -33,37 +33,32 @@ print("Dataset shape:", df.shape)
 print(df.head())
 
 # -------------------------------
-# 2. Create Student_ID (Identifier)
+# 2. Create Identifier
 # -------------------------------
 df["Student_ID"] = np.arange(1, len(df) + 1)
 
 # -------------------------------
-# 3. Create Target Labels
+# 3. Target Column
 # -------------------------------
-df["avg_score"] = df[["math score", "reading score", "writing score"]].mean(axis=1)
+# Kaggle dataset usually has a column like: "Target" or "Outcome"
+# Example values: "Dropout", "Enrolled", "Graduate"
 
-def label_perf(x):
-    if x < 50:
-        return "Fail"
-    elif x <= 75:
-        return "Pass"
-    else:
-        return "Distinction"
+TARGET_COL = "Target"  # change if your column name is different
 
-df["label"] = df["avg_score"].apply(label_perf)
+print("\nClass distribution:\n", df[TARGET_COL].value_counts())
 
-print("\nClass distribution:\n", df["label"].value_counts())
-
-# Encode labels
+# Encode target labels
 le = LabelEncoder()
-df["y"] = le.fit_transform(df["label"])  # 0,1,2
+df["y"] = le.fit_transform(df[TARGET_COL])  # 0,1,2,...
 
 # -------------------------------
 # 4. Prepare Features and Target
 # -------------------------------
-ids = df["Student_ID"]  # keep IDs for saving results
+ids = df["Student_ID"]
 
-X = pd.get_dummies(df.drop(columns=["label", "y", "avg_score", "Student_ID"]), drop_first=True)
+X = df.drop(columns=[TARGET_COL, "y", "Student_ID"])
+X = pd.get_dummies(X, drop_first=True)  # encode categorical features
+
 y = df["y"]
 
 # Scale features
@@ -71,10 +66,10 @@ scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
 
 # -------------------------------
-# 5. Train-Test Split (including IDs)
+# 5. Train-Test Split
 # -------------------------------
 X_train, X_test, y_train, y_test, id_train, id_test = train_test_split(
-    X_scaled, y, ids, test_size=0.2, random_state=42
+    X_scaled, y, ids, test_size=0.2, random_state=42, stratify=y
 )
 
 print("Train shape:", X_train.shape)
@@ -86,21 +81,25 @@ print("Test shape:", X_test.shape)
 model = Sequential()
 
 # Input layer + Hidden layer 1
+# Input layer size = number of features
 model.add(Dense(64, activation="relu", input_shape=(X_train.shape[1],)))
 
 # Hidden layer 2
 model.add(Dense(32, activation="relu"))
 
+# Hidden layer 3 (optional but improves learning capacity)
+model.add(Dense(16, activation="relu"))
+
 # Dropout for regularization
 model.add(Dropout(0.3))
 
-# Output layer (3 classes)
-model.add(Dense(3, activation="softmax"))
+# Output layer (number of classes)
+model.add(Dense(len(le.classes_), activation="softmax"))
 
 # Compile model
 model.compile(
-    optimizer="adam",
-    loss="sparse_categorical_crossentropy",
+    optimizer="adam",  # Adaptive optimizer for faster & stable convergence
+    loss="sparse_categorical_crossentropy",  # Suitable for multi-class with integer labels
     metrics=["accuracy"]
 )
 
@@ -131,7 +130,12 @@ y_pred_probs = model.predict(X_test)
 y_pred = np.argmax(y_pred_probs, axis=1)
 
 acc = accuracy_score(y_test, y_pred)
+prec = precision_score(y_test, y_pred, average="weighted")
+rec = recall_score(y_test, y_pred, average="weighted")
+
 print("\nTest Accuracy:", acc)
+print("Test Precision:", prec)
+print("Test Recall:", rec)
 
 print("\nClassification Report:\n")
 print(classification_report(y_test, y_pred, target_names=le.classes_))
@@ -148,7 +152,7 @@ results_df = pd.DataFrame({
     "Predicted_Label": le.inverse_transform(y_pred)
 })
 
-output_file = os.path.join(OUTPUT_DIR, "student_performance_test_results.csv")
+output_file = os.path.join(OUTPUT_DIR, "dropout_test_results.csv")
 results_df.to_csv(output_file, index=False)
 
 print(f"\n✅ Test results saved at: {output_file}")
